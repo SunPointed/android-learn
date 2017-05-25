@@ -1,7 +1,7 @@
 # PhotoView 学习
 PhotoView aims to help produce an easily usable implementation of a zooming Android ImageView.
 
-<!-- [![](https://jitpack.io/v/chrisbanes/PhotoView.svg)](https://jitpack.io/#chrisbanes/PhotoView) -->
+[![](https://jitpack.io/v/chrisbanes/PhotoView.svg)](https://jitpack.io/#chrisbanes/PhotoView)
 
 ## 重要的类
 ###  1.GestureDetector
@@ -20,125 +20,25 @@ Detects scaling transformation gestures using the supplied MotionEvents. The Sca
 ### 3.VelocityTracker
 Helper for tracking the velocity of touch events, for implementing flinging and other such gestures. Use obtain() to retrieve a new instance of the class when you are going to begin tracking. Put the motion events you receive into it with addMovement(MotionEvent). When you want to determine the velocity call computeCurrentVelocity(int) and then call getXVelocity(int) and getYVelocity(int) to retrieve the velocity for each pointer id.
 
-## 流程分析
-
-### 1.PhotoView
-继承自ImageView，内部逻辑交给PhotoViewAttacher类的实例attacher处理
-
-### 2.PhotoViewAttacher
-实现View.OnTouchListener，View.OnLayoutChangeListener，OnGestureListener
-
-1.构造函数如下
+## 要点
+#### 1.PhotoView在PhotoViewAttacher的构造函数中被setOnTouchListener,事件是从此处开始分发的，关注PhotoViewAttacher实现View.OnTouchListener接口的onTouch方法
 ```java
-public PhotoViewAttacher(ImageView imageView) {
-        mImageView = imageView;
-        //为iamgeView添加监听事件
-        imageView.setOnTouchListener(this);
-        imageView.addOnLayoutChangeListener(this);
-
-        //...
-
-        // Create Gesture Detectors...
-        mScaleDragDetector = new CustomGestureDetector(imageView.getContext(), this);
-
-        mGestureDetector = new GestureDetector(imageView.getContext(), new GestureDetector.SimpleOnGestureListener() {
-
-            // 处理长按事件
-            @Override
-            public void onLongPress(MotionEvent e) {
-                if (mLongClickListener != null) {
-                    mLongClickListener.onLongClick(mImageView);
-                }
-            }
-            // 处理Fling事件
-            @Override
-            public boolean onFling(MotionEvent e1, MotionEvent e2,
-                                   float velocityX, float velocityY) {
-                if (mSingleFlingListener != null) {
-                    if (getScale() > DEFAULT_MIN_SCALE) {
-                        return false;
-                    }
-
-                    if (MotionEventCompat.getPointerCount(e1) > SINGLE_TOUCH
-                            || MotionEventCompat.getPointerCount(e2) > SINGLE_TOUCH) {
-                        return false;
-                    }
-
-                    return mSingleFlingListener.onFling(e1, e2, velocityX, velocityY);
-                }
-                return false;
-            }
-        });
-
-        // 处理双击事件
-        mGestureDetector.setOnDoubleTapListener(new GestureDetector.OnDoubleTapListener() {
-            @Override
-            public boolean onSingleTapConfirmed(MotionEvent e) {
-                if (mOnClickListener != null) {
-                    mOnClickListener.onClick(mImageView);
-                }
-                final RectF displayRect = getDisplayRect();
-
-                final float x = e.getX(), y = e.getY();
-
-                if (mViewTapListener != null) {
-                    mViewTapListener.onViewTap(mImageView, x, y);
-                }
-
-                if (displayRect != null) {
-
-                    // Check to see if the user tapped on the photo
-                    if (displayRect.contains(x, y)) {
-
-                        float xResult = (x - displayRect.left)
-                                / displayRect.width();
-                        float yResult = (y - displayRect.top)
-                                / displayRect.height();
-
-                        if (mPhotoTapListener != null) {
-                            mPhotoTapListener.onPhotoTap(mImageView, xResult, yResult);
-                        }
-                        return true;
-                    } else {
-                        if (mOutsidePhotoTapListener != null) {
-                            mOutsidePhotoTapListener.onOutsidePhotoTap(mImageView);
-                        }
-                    }
-                }
-                return false;
-            }
-
-            @Override
-            public boolean onDoubleTap(MotionEvent ev) {
-                try {
-                    float scale = getScale();
-                    float x = ev.getX();
-                    float y = ev.getY();
-
-                    if (scale < getMediumScale()) {
-                        setScale(getMediumScale(), x, y, true);
-                    } else if (scale >= getMediumScale() && scale < getMaximumScale()) {
-                        setScale(getMaximumScale(), x, y, true);
-                    } else {
-                        setScale(getMinimumScale(), x, y, true);
-                    }
-                } catch (ArrayIndexOutOfBoundsException e) {
-                    // Can sometimes happen when getX() and getY() is called
-                }
-
-                return true;
-            }
-
-            @Override
-            public boolean onDoubleTapEvent(MotionEvent e) {
-                // Wait for the confirmed onDoubleTap() instead
-                return false;
-            }
-        });
-    }
+    imageView.setOnTouchListener(this);
 ```
-
-2.先看一下onTouch方法的处理
+-----------------------
+#### 2.PhotoViewAttacher初始化了CustomGestureDetector,关注PhotoViewAttacher实现OnGestureListener的onDrag，onFling，onScale方法在CustomGestureDetector如何使用
+```java
+    mScaleDragDetector = new CustomGestureDetector(imageView.getContext(), this);
+```
+-----------------------
+#### 3.PhotoViewAttacher的变量
+    mBaseMatrix->保存imageView中drawble的初始矩阵信息，稳定
+    mSuppMatrix->保存作用于imageView中drawble的矩阵变化信息
+    mBaseRotation->默认为0，需手动设置，所以不考虑旋转
+    mDrawMatrix->中间变量，由mBaseMatrix和mSuppMatrix计算得到，imageView中drawble每次变化的最终矩阵
+-----------------------
+## 流程分析
+#### 1.PhotoViewAttacher的onTouch
 ```java
     @Override
     public boolean onTouch(View v, MotionEvent ev) {
@@ -149,13 +49,12 @@ public PhotoViewAttacher(ImageView imageView) {
             switch (ev.getAction()) {
                 case MotionEvent.ACTION_DOWN:
                     ViewParent parent = v.getParent();
-                    // 屏蔽父控件的interceptTouchEvent方法                 
+                    // 屏蔽父控件的interceptTouchEvent方法                
                     if (parent != null) {
                         parent.requestDisallowInterceptTouchEvent(true);
                     }
 
-                    // If we're flinging, and the user presses down, cancel
-                    // fling
+                    // 停止fling，因为用户又touch屏幕了
                     cancelFling();
                     break;
 
@@ -181,7 +80,7 @@ public PhotoViewAttacher(ImageView imageView) {
                 // 判断是否拖动，最初为false
                 boolean wasDragging = mScaleDragDetector.isDragging();
 
-                // 把事件交给CustomGestureDetector的onTouchEvent方法处理，执行该行后，handled是一直为true的，跳转3
+                // 把事件交给CustomGestureDetector的onTouchEvent方法处理，执行该行后，handled是一直为true的
                 handled = mScaleDragDetector.onTouchEvent(ev);
 
                 // 如果仍然处于缩放或拖动，就继续屏蔽父控件的interceptTouchEvent方法
@@ -201,14 +100,15 @@ public PhotoViewAttacher(ImageView imageView) {
         return handled;
     }
 ```
-
-3.CustomGestureDetector的onTouchEvent方法，处理缩放
+####此处重要的方法是CustomGestureDetector的onTouchEvent（跳转2），GestureDetector的onTouchEvent（跳转4），
+-----------------------
+#### 2.CustomGestureDetector的onTouchEvent
 ```java
-public boolean onTouchEvent(MotionEvent ev) {
+    public boolean onTouchEvent(MotionEvent ev) {
         try {
-            // 此处的mDEtector即为ScaleGestureDetector
+            // 此处的mDEtector即为ScaleGestureDetector,这里的会执行到PhotoViewAttacher实现OnGestureListener的onScale方法，在mDEtector设置的ScaleGestureDetector.OnScaleGestureListener中会调用onScale方法，mDEtector在CustomGestureDetector的构造函数中初始化
             mDetector.onTouchEvent(ev);
-            // processTouchEvent，跳转到4
+            // processTouchEvent
             return processTouchEvent(ev);
         } catch (IllegalArgumentException e) {
             // Fix for support lib bug, happening when onDestroy is called
@@ -216,10 +116,89 @@ public boolean onTouchEvent(MotionEvent ev) {
         }
     }
 ```
-
-4.CustomGestureDetector的processTouchEvent方法，此方法始终返回true
+####此处重要的方法是mDetector击ScaleGestureDetector的onTouchEvent（跳转3），CustomGestureDetector的processTouchEvent（跳转5）
+-----------------------
+#### 3.CustomGestureDetector的构造函数，在mDetector设置了mScaleListener，所以在mDetector的onTouchEvent方法中会调用mScaleListener的onScale，最终调用mListener的onScale，而mListener就是实现了OnGestureListener接口的PhotoViewAttacher
 ```java
-private boolean processTouchEvent(MotionEvent ev) {
+    CustomGestureDetector(Context context, OnGestureListener listener) {
+        final ViewConfiguration configuration = ViewConfiguration
+                .get(context);
+        mMinimumVelocity = configuration.getScaledMinimumFlingVelocity();
+        mTouchSlop = configuration.getScaledTouchSlop();
+
+        // 这个listener就是实现了OnGestureListener接口的PhotoViewAttacher
+        mListener = listener;
+        ScaleGestureDetector.OnScaleGestureListener mScaleListener = new ScaleGestureDetector.OnScaleGestureListener() {
+
+            @Override
+            public boolean onScale(ScaleGestureDetector detector) {
+                float scaleFactor = detector.getScaleFactor();
+
+                if (Float.isNaN(scaleFactor) || Float.isInfinite(scaleFactor))
+                    return false;
+
+                // 此处会调用PhotoViewAttacher的onScale方法，计算所方式矩阵的变化，跳转14
+                mListener.onScale(scaleFactor,
+                        detector.getFocusX(), detector.getFocusY());
+                return true;
+            }
+
+            @Override
+            public boolean onScaleBegin(ScaleGestureDetector detector) {
+                return true;
+            }
+
+            @Override
+            public void onScaleEnd(ScaleGestureDetector detector) {
+                // NO-OP
+            }
+        };
+        // 初始化mDetector
+        mDetector = new ScaleGestureDetector(context, mScaleListener);
+    }
+```
+####此处我们回到PhotoViewAttacher中（跳转6）
+-----------------------
+#### 4.mGestureDetector的onTouchEvent，mGestureDetector在PhotoViewAttacher的构造函数中初始化，主要处理长按，双击，用户设置的mSingleFlingListener，如下
+```java
+    mGestureDetector = new GestureDetector(imageView.getContext(), new GestureDetector.SimpleOnGestureListener() {
+
+            // 处理长按事件
+            @Override
+            public void onLongPress(MotionEvent e) {
+                if (mLongClickListener != null) {
+                    mLongClickListener.onLongClick(mImageView);
+                }
+            }
+            // 处理用户设置的mSingleFlingListener
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2,
+                                   float velocityX, float velocityY) {
+                if (mSingleFlingListener != null) {
+                    if (getScale() > DEFAULT_MIN_SCALE) {
+                        return false;
+                    }
+
+                    if (MotionEventCompat.getPointerCount(e1) > SINGLE_TOUCH
+                            || MotionEventCompat.getPointerCount(e2) > SINGLE_TOUCH) {
+                        return false;
+                    }
+
+                    return mSingleFlingListener.onFling(e1, e2, velocityX, velocityY);
+                }
+                return false;
+            }
+        });
+
+        // 处理双击事件
+        mGestureDetector.setOnDoubleTapListener(new GestureDetector.OnDoubleTapListener() {
+            // ...
+        });
+```
+-----------------------
+#### 5.CustomGestureDetector的processTouchEvent
+```java
+    private boolean processTouchEvent(MotionEvent ev) {
         final int action = ev.getAction();
         switch (action & MotionEvent.ACTION_MASK) {
             case MotionEvent.ACTION_DOWN:
@@ -249,7 +228,7 @@ private boolean processTouchEvent(MotionEvent ev) {
                 }
 
                 if (mIsDragging) {
-                    // mIsDragging为true,调用OnGestureListener的onDrag，PhotoViewAttacher自身实现OnGestureListener接口，跳转5
+                    // mIsDragging为true,调用OnGestureListener的onDrag，PhotoViewAttacher自身实现OnGestureListener接口
                     mListener.onDrag(dx, dy);
                     mLastTouchX = x;
                     mLastTouchY = y;
@@ -281,7 +260,7 @@ private boolean processTouchEvent(MotionEvent ev) {
                         final float vX = mVelocityTracker.getXVelocity(), vY = mVelocityTracker
                                 .getYVelocity();
 
-                        // 如果速率大于mMinimumVelocity，调用OnGestureListener的onFling，PhotoViewAttacher自身实现OnGestureListener接口，跳转11
+                        // 如果速率大于mMinimumVelocity，调用OnGestureListener的onFling，PhotoViewAttacher自身实现OnGestureListener接口
                         if (Math.max(Math.abs(vX), Math.abs(vY)) >= mMinimumVelocity) {
                             mListener.onFling(mLastTouchX, mLastTouchY, -vX,
                                     -vY);
@@ -315,62 +294,40 @@ private boolean processTouchEvent(MotionEvent ev) {
         return true;
     }
 ```
-
-5.PhotoViewAttacher实现OnGestureListener的onDrag，
+####此处在MotionEvent.ACTION_MOVE中调用mListener.onDrag，在MotionEvent.ACTION_UP调用mListener.onFling（当然都要满足一定的条件），同样mListener就是实现了OnGestureListener接口的PhotoViewAttacher，回到PhotoViewAttacher中（跳转6）
+-----------------------
+#### 6.PhotoViewAttacher的onScale, onDrag, onFling
+###### 6.1 在此之前，先介绍几个PhotoViewAttacher中的方法
+######getDrawMatrix，各种事件会将矩阵的变化保存到mSuppMatrix中，而mBaseMatrix保存imageView中drawable原本的矩阵信息，该方法返回变化后的矩阵信息
 ```java
-    @Override
-    public void onDrag(float dx, float dy) {
-        if (mScaleDragDetector.isScaling()) {
-            return; // Do not drag if we are already scaling
-        }
+    private Matrix getDrawMatrix() {
+        // 用mDrawMatrix保存mBaseMatrix的信息，mBaseMatrix在updateBaseMatrix方法中保存的是drawable原本的矩阵信息
+        mDrawMatrix.set(mBaseMatrix);
+        // mDrawMatrix和mSuppMatrix合并，mDrawMatrix中保存的是变化后的矩阵信息
+        mDrawMatrix.postConcat(mSuppMatrix);
+        return mDrawMatrix;
+    }
+```
 
-        // mSuppMatrix初始化为new Matrix()
-        mSuppMatrix.postTranslate(dx, dy);
-        // 跳转6
-        checkAndDisplayMatrix();
+######setImageViewMatrix，完成一次imageView中drawable的变化（缩放、位移）
+```java
+    private void setImageViewMatrix(Matrix matrix) {
+        // 调用ImageView的setImageMatrix将矩阵应用到imageView的drawable上
+        mImageView.setImageMatrix(matrix);
 
-        /*
-         * Here we decide whether to let the ImageView's parent to start taking
-         * over the touch event.
-         *
-         * First we check whether this function is enabled. We never want the
-         * parent to take over if we're scaling. We then check the edge we're
-         * on, and the direction of the scroll (i.e. if we're pulling against
-         * the edge, aka 'overscrolling', let the parent take over).
-         */
-        ViewParent parent = mImageView.getParent();
-        // mAllowParentInterceptOnEdge默认为true 
-        if (mAllowParentInterceptOnEdge && !mScaleDragDetector.isScaling() && !mBlockParentIntercept) {
-            if (mScrollEdge == EDGE_BOTH
-                    || (mScrollEdge == EDGE_LEFT && dx >= 1f)
-                    || (mScrollEdge == EDGE_RIGHT && dx <= -1f)) {
-                if (parent != null) {
-                    parent.requestDisallowInterceptTouchEvent(false);
-                }
-            }
-        } else {
-            if (parent != null) {
-                parent.requestDisallowInterceptTouchEvent(true);
+        if (mMatrixChangeListener != null) {
+            RectF displayRect = getDisplayRect(matrix);
+            if (displayRect != null) {
+                // 调用用户设置的mMatrixChangeListener
+                mMatrixChangeListener.onMatrixChanged(displayRect);
             }
         }
     }
 ```
 
-6.PhotoViewAttacher的checkAndDisplayMatrix
+######checkMatrixBounds，该函数将drawable因ScaleType产生位移信息保存在mSuppMatrix中
 ```java
-private void checkAndDisplayMatrix() {
-    // checkMatrixBounds,跳转7
-    if (checkMatrixBounds()) {
-        // getDrawMatrix，跳转8
-        // setImageViewMatrix，跳转9
-        setImageViewMatrix(getDrawMatrix());  
-    }
-}
-```
-
-7.PhotoViewAttacher的checkMatrixBounds
-```java
-private boolean checkMatrixBounds() {
+    private boolean checkMatrixBounds() {
 
         // 通过mapRect方法将getDrawMatrix返回的矩阵应用到mDisplayRect，mDisplayRect设置为iamgeView的drawable的大小
         final RectF rect = getDisplayRect(getDrawMatrix());
@@ -383,48 +340,11 @@ private boolean checkMatrixBounds() {
 
         // 根据ScaleType获取y轴移动的距离
         final int viewHeight = getImageViewHeight(mImageView);
-        if (height <= viewHeight) {
-            switch (mScaleType) {
-                case FIT_START:
-                    deltaY = -rect.top;
-                    break;
-                case FIT_END:
-                    deltaY = viewHeight - height - rect.top;
-                    break;
-                default:
-                    deltaY = (viewHeight - height) / 2 - rect.top;
-                    break;
-            }
-        } else if (rect.top > 0) {
-            deltaY = -rect.top;
-        } else if (rect.bottom < viewHeight) {
-            deltaY = viewHeight - rect.bottom;
-        }
+        // ...
 
         // 根据ScaleType获取x轴移动的距离
         final int viewWidth = getImageViewWidth(mImageView);
-        if (width <= viewWidth) {
-            switch (mScaleType) {
-                case FIT_START:
-                    deltaX = -rect.left;
-                    break;
-                case FIT_END:
-                    deltaX = viewWidth - width - rect.left;
-                    break;
-                default:
-                    deltaX = (viewWidth - width) / 2 - rect.left;
-                    break;
-            }
-            mScrollEdge = EDGE_BOTH;
-        } else if (rect.left > 0) {
-            mScrollEdge = EDGE_LEFT;
-            deltaX = -rect.left;
-        } else if (rect.right < viewWidth) {
-            deltaX = viewWidth - rect.right;
-            mScrollEdge = EDGE_RIGHT;
-        } else {
-            mScrollEdge = EDGE_NONE;
-        }
+        // ...
 
         // 将x,y方向上移动的距离保存到mSuppMatrix
         mSuppMatrix.postTranslate(deltaX, deltaY);
@@ -432,65 +352,41 @@ private boolean checkMatrixBounds() {
     }
 ```
 
-8.PhotoViewAttacher的getDrawMatrix
+######checkAndDisplayMatrix，上面三个方法的结合使用，onScale,onDrag会用到
 ```java
-private Matrix getDrawMatrix() {
-        // mBaseMatrix是在updateBaseMatrix方法中使用的，跳转10
-        mDrawMatrix.set(mBaseMatrix);
-        // mBaseMatrix和mSuppMatrix合并
-        mDrawMatrix.postConcat(mSuppMatrix);
-        return mDrawMatrix;
+    private void checkAndDisplayMatrix() {
+        // checkMatrixBounds
+        if (checkMatrixBounds()) {
+            // getDrawMatrix
+            // setImageViewMatrix
+            setImageViewMatrix(getDrawMatrix());  
+        }
     }
 ```
-
-9.PhotoViewAttacher的setImageViewMatrix，此处执行完一次onDrag完成
+-----------------------
+###### 6.2 PhotoViewAttacher的onScale方法
 ```java
-private void setImageViewMatrix(Matrix matrix) {
-        // 调用ImageView的setImageMatrix将矩阵应用到imageView的drawable上
-        mImageView.setImageMatrix(matrix);
-
-        // Call MatrixChangedListener if needed
-        if (mMatrixChangeListener != null) {
-            RectF displayRect = getDisplayRect(matrix);
-            if (displayRect != null) {
-                mMatrixChangeListener.onMatrixChanged(displayRect);
+    @Override
+    public void onScale(float scaleFactor, float focusX, float focusY) {
+        if ((getScale() < mMaxScale || scaleFactor < 1f) && (getScale() > mMinScale || scaleFactor > 1f)) {
+            if (mScaleChangeListener != null) {
+                // 调用用户设置的mScaleChangeListener
+                mScaleChangeListener.onScaleChange(scaleFactor, focusX, focusY);
             }
+            // 将缩放保存在mSuppMatrix中
+            mSuppMatrix.postScale(scaleFactor, scaleFactor, focusX, focusY);
+            // PhotoViewAttacher的checkAndDisplayMatrix
+            checkAndDisplayMatrix();
         }
     }
 ```
-
-10.PhotoViewAttacher的updateBaseMatrix
-```java
-private void updateBaseMatrix(Drawable drawable) {
-        if (drawable == null) {
-            return;
-        }
-
-        // 获取imageView和drawable的宽高
-        final float viewWidth = getImageViewWidth(mImageView);
-        final float viewHeight = getImageViewHeight(mImageView);
-        final int drawableWidth = drawable.getIntrinsicWidth();
-        final int drawableHeight = drawable.getIntrinsicHeight();
-
-        // 讲mBaseMatrix重置为单位矩阵
-        mBaseMatrix.reset();
-
-        final float widthScale = viewWidth / drawableWidth;
-        final float heightScale = viewHeight / drawableHeight;
-
-        // 根据不同的ScaleType计算相应的矩阵，计算结果保存在mBaseMatrix中，省略
-        // ...
-
-        resetMatrix();
-    }
-```
-
-11.PhotoViewAttacher实现OnGestureListener的onFling
+-----------------------
+###### 6.3 PhotoViewAttacher的onFling方法
 ```java
     @Override
     public void onFling(float startX, float startY, float velocityX,
                         float velocityY) {
-        // 此处向主线程post了一个FlingRunnable，FlingRunnable是PhotoViewAttacher的内部类，跳转12
+        // 此处向主线程post了一个FlingRunnable，FlingRunnable是PhotoViewAttacher的内部类
         mCurrentFlingRunnable = new FlingRunnable(mImageView.getContext());
         mCurrentFlingRunnable.fling(getImageViewWidth(mImageView),
                 getImageViewHeight(mImageView), (int) velocityX, (int) velocityY);
@@ -498,30 +394,21 @@ private void updateBaseMatrix(Drawable drawable) {
     }
 ```
 
-12.FlingRunnable
+######FlingRunnable
 ```java
-private class FlingRunnable implements Runnable {
+    private class FlingRunnable implements Runnable {
 
         private final OverScroller mScroller;
         private int mCurrentX, mCurrentY;
 
-        public FlingRunnable(Context context) {
-            mScroller = new OverScroller(context);
-        }
+        // ...
 
-        public void cancelFling() {
-            mScroller.forceFinished(true);
-        }
-
-        // fling的条件是当前iamgeView的width或height小于getDisplayRect获得的rect的width或height，简单说就是图片超出了imageView的范围
+        // fling的条件是当前iamgeView的width或height小于getDisplayRect获得的rect的width或height，简单说就是drawable超出了imageView的范围
         public void fling(int viewWidth, int viewHeight, int velocityX,
                           int velocityY) {
-            final RectF rect = getDisplayRect();
-            if (rect == null) {
-                return;
-            }
+            // ...
 
-            // startX为Math.round(-rect.left)，注意理解负号，首先如果要fling，上面说过了图片超出了imageView的范围，所以 -rect.left实际上是一个正的值！这个值在0到rect.width() - viewWidth范围之间
+            // startX为Math.round(-rect.left)，注意理解负号，首先如果要fling，上面说过了drawable超出了imageView的范围，所以 -rect.left实际上是一个正的值！这个值在0到rect.width() - viewWidth范围之间
             final int startX = Math.round(-rect.left);
             final int minX, maxX, minY, maxY;
 
@@ -533,13 +420,7 @@ private class FlingRunnable implements Runnable {
             }
 
             // 同见startX的解释
-            final int startY = Math.round(-rect.top);
-            if (viewHeight < rect.height()) {
-                minY = 0;
-                maxY = Math.round(rect.height() - viewHeight);
-            } else {
-                minY = maxY = startY;
-            }
+            // ...
 
             mCurrentX = startX;
             mCurrentY = startY;
@@ -578,4 +459,73 @@ private class FlingRunnable implements Runnable {
         }
     }
 ```
+-----------------------
+###### 6.4 PhotoViewAttacher的onDrag方法
+```java
+    @Override
+    public void onDrag(float dx, float dy) {
+        if (mScaleDragDetector.isScaling()) {
+            return; // Do not drag if we are already scaling
+        }
 
+        // 将拖动保存在mSuppMatrix中
+        mSuppMatrix.postTranslate(dx, dy);
+        
+        checkAndDisplayMatrix();
+
+        // 判断是否继续设置父控件requestDisallowInterceptTouchEvent(false)
+        // ...
+    }
+```
+-----------------------
+## 其他
+PhotoViewAttacher构造函数中为imageView添加了View.OnLayoutChangeListener
+```java
+    imageView.addOnLayoutChangeListener(this);
+```
+---
+当iamgeView发生变化时
+```java
+    @Override
+    public void onLayoutChange(View v, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
+        // Update our base matrix, as the bounds have changed
+        updateBaseMatrix(mImageView.getDrawable());
+    }
+```
+---
+PhotoViewAttacher的updateBaseMatrix会将mBaseMatrix重置为单位矩阵
+```java
+    private void updateBaseMatrix(Drawable drawable) {
+        if (drawable == null) {
+            return;
+        }
+
+        // 获取imageView和drawable的宽高
+        // ...
+
+        // 讲mBaseMatrix重置为单位矩阵
+        mBaseMatrix.reset();
+
+        final float widthScale = viewWidth / drawableWidth;
+        final float heightScale = viewHeight / drawableHeight;
+
+        // 根据不同的ScaleType计算相应的矩阵，计算结果保存在mBaseMatrix中，省略
+        // ...
+
+        //重置各个矩阵
+        resetMatrix();
+    }
+```
+---
+resetMatrix置mSuppMatrix为单位矩阵并用它将用户设置的mBaseRotation作用到drawable上
+```java
+    private void resetMatrix() {
+        // 置mSuppMatrix为单位矩阵
+        mSuppMatrix.reset();
+        // 将mBaseRotation的旋转保存到mSuppMatrix中，mBaseRotation默认为0.0f
+        setRotationBy(mBaseRotation);
+        // 将最初的矩阵（最多有旋转信息）作用到imageView上
+        setImageViewMatrix(getDrawMatrix());
+        checkMatrixBounds();
+    }
+```
