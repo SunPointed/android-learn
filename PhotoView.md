@@ -1,7 +1,7 @@
 # PhotoView 学习
 PhotoView aims to help produce an easily usable implementation of a zooming Android ImageView.
 
-[![](https://jitpack.io/v/chrisbanes/PhotoView.svg)](https://jitpack.io/#chrisbanes/PhotoView)
+* [项目地址](https://github.com/chrisbanes/PhotoView)
 
 ## 重要的类
 ###  1.GestureDetector
