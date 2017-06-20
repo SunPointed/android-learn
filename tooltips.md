@@ -110,9 +110,9 @@ Simple to use library for android, Enabling to add a tooltip near any view with 
         // add tip to root layout
         toolTip.getRootView().addView(tipView);
 
+        // 跳转12 把tipView放到相应的位置
         // find where to position the tool tip
         Point p = ToolTipCoordinatesFinder.getCoordinates(tipView, toolTip);
-
         // move tip view to correct position
         moveTipToCorrectPosition(tipView, p);
 
@@ -125,6 +125,7 @@ Simple to use library for android, Enabling to add a tooltip near any view with 
             }
         });
 
+        // 复用相关
         // bind tipView with anchorView id
         int anchorViewId = toolTip.getAnchorView().getId();
         tipView.setTag(anchorViewId);
@@ -280,6 +281,79 @@ Simple to use library for android, Enabling to add a tooltip near any view with 
         return popout;
     }
 }
+```
+
+## 12.ToolTipCoordinatesFinder -> getCoordinates
+```java
+    /**
+     * return the top left coordinates for positioning the tip
+     * 
+     * @param tipView - the newly created tip view
+     * @param tooltip - tool tip object
+     * @return point
+     */
+    static Point getCoordinates(final TextView tipView, ToolTip tooltip) {
+        Point point = new Point();
+        // Coordinates是一个封装left、right、top、bottom位置的类，这里两个Coordinates分别保存anchor和viewgroup的位置信息
+        final Coordinates anchorViewCoordinates = new Coordinates(tooltip.getAnchorView());
+        final Coordinates rootCoordinates = new Coordinates(tooltip.getRootView());
+
+        tipView.measure(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+
+        switch (tooltip.getPosition()) {
+            case ToolTip.POSITION_ABOVE:
+                // 跳转13 其余三个类似
+                point = getPositionAbove(tipView, tooltip,
+                        anchorViewCoordinates, rootCoordinates);
+                break;
+            case ToolTip.POSITION_BELOW:
+                point = getPositionBelow(tipView, tooltip,
+                        anchorViewCoordinates, rootCoordinates);
+                break;
+            case ToolTip.POSITION_LEFT_TO:
+                point = getPositionLeftTo(tipView, tooltip,
+                        anchorViewCoordinates, rootCoordinates);
+                break;
+            case ToolTip.POSITION_RIGHT_TO:
+                point = getPositionRightTo(tipView, tooltip,
+                        anchorViewCoordinates, rootCoordinates);
+                break;
+        }
+
+        // add user defined offset values
+        point.x += UiUtils.isRtl() ? -tooltip.getOffsetX() : tooltip.getOffsetX();
+        point.y += tooltip.getOffsetY();
+
+        // coordinates retrieved are relative to 0,0 of the root layout
+        // added view to root is subject to root padding
+        // we need to subtract the top and left padding of root from coordinates. to adjust
+        // top left tip coordinates
+        point.x -= tooltip.getRootView().getPaddingLeft();
+        point.y -= tooltip.getRootView().getPaddingTop();
+
+        return point;
+
+    }
+```
+
+## 13.ToolTipCoordinatesFinder -> getPositionAbove
+```java
+    private static Point getPositionAbove(TextView tipView, ToolTip toolTip,
+                                          Coordinates anchorViewCoordinates, Coordinates rootLocation) {
+        Point point = new Point();
+        // getXOffset根据toolTip.getAlign()获取相应的offset
+        point.x = anchorViewCoordinates.left + getXOffset(tipView, toolTip);
+        // 各个adjust方法保证tipView不超过viewgroup，Align不同计算策略不同
+        if (toolTip.alignedCenter()) {
+            AdjustHorizontalCenteredOutOfBounds(tipView, toolTip.getRootView(), point, rootLocation);
+        } else if (toolTip.alignedLeft()){
+            AdjustHorizontalLeftAlignmentOutOfBounds(tipView, toolTip.getRootView(), point, anchorViewCoordinates, rootLocation);
+        } else if (toolTip.alignedRight()){
+            AdjustHorizotalRightAlignmentOutOfBounds(tipView, toolTip.getRootView(), point, anchorViewCoordinates, rootLocation);
+        }
+        point.y = anchorViewCoordinates.top - tipView.getMeasuredHeight();
+        return point;
+    }
 ```
 
 分析到此，大致流程都已经了解了，tooltips最巧妙的地方是用.9png图片实现了textView的三角效果（这种骚东西可以省去不少时间啊），如下：
